@@ -1,0 +1,341 @@
+/* ===== Global ===== */
+QWidget {
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+}
+
+QMainWindow {
+    background-color: #1a1a2e;
+}
+
+/* ===== Labels ===== */
+QLabel {
+    color: #e0e0e0;
+}
+
+QLabel#score_label {
+    font-size: 56px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+QLabel#team_label {
+    font-size: 20px;
+    font-weight: bold;
+    color: #a0c4ff;
+}
+
+QLabel#serve_label {
+    font-size: 16px;
+    color: #ffd6a5;
+}
+
+QLabel#possession_label {
+    font-size: 15px;
+    font-weight: bold;
+    padding: 6px 16px;
+    border-radius: 12px;
+    background-color: #2d2d4e;
+}
+
+QLabel#title_label {
+    font-size: 36px;
+    font-weight: bold;
+    color: #a0c4ff;
+}
+
+QLabel#subtitle_label {
+    font-size: 16px;
+    color: #8888aa;
+}
+
+/* ===== Buttons ===== */
+QPushButton {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    border: 1px solid #444466;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #3d3d6e;
+    border-color: #aabbff;
+}
+
+QPushButton:pressed {
+    background-color: #ffffff;
+    color: #16162a;
+    border-color: #ffffff;
+}
+
+QPushButton:focus {
+    outline: none;
+    border-color: #aabbff;
+}
+
+QPushButton:disabled {
+    background-color: #1e1e2e;
+    color: #555577;
+    border-color: #333355;
+}
+
+/* Primary action buttons */
+QPushButton#btn_primary {
+    background-color: #4a90d9;
+    color: #ffffff;
+    border: none;
+    font-size: 16px;
+    min-height: 52px;
+}
+
+QPushButton#btn_primary:hover {
+    background-color: #5aa0e9;
+}
+
+QPushButton#btn_primary:disabled {
+    background-color: #2a4060;
+    color: #6688aa;
+}
+
+/* Ace — green */
+QPushButton#btn_ace {
+    background-color: #2d6a4f;
+    color: #d8f3dc;
+    border: 1px solid #52b788;
+}
+QPushButton#btn_ace:hover { background-color: #40916c; }
+QPushButton#btn_ace:disabled { background-color: #1a3a2a; color: #446655; border-color: #335544; }
+
+/* Fault — orange */
+QPushButton#btn_fault {
+    background-color: #7d4e1e;
+    color: #ffd6a5;
+    border: 1px solid #e07b39;
+}
+QPushButton#btn_fault:hover { background-color: #9d6e3e; }
+QPushButton#btn_fault:disabled { background-color: #3a2010; color: #665533; border-color: #553322; }
+
+/* Receive — blue */
+QPushButton#btn_receive {
+    background-color: #1a4a7a;
+    color: #a0c4ff;
+    border: 1px solid #4a8ac4;
+}
+QPushButton#btn_receive:hover { background-color: #2a5a8a; }
+QPushButton#btn_receive:disabled { background-color: #0e2035; color: #334455; border-color: #223344; }
+
+/* Hit — red-ish */
+QPushButton#btn_hit {
+    background-color: #7a2035;
+    color: #ffb3c1;
+    border: 1px solid #c44a60;
+}
+QPushButton#btn_hit:hover { background-color: #8a3045; }
+QPushButton#btn_hit:disabled { background-color: #3a1020; color: #664455; border-color: #553344; }
+
+/* Weak variants — slightly muted */
+QPushButton[weak="true"] {
+    opacity: 0.75;
+    font-style: italic;
+}
+
+/* Undo — yellow */
+QPushButton#btn_undo {
+    background-color: #4a3a00;
+    color: #ffd700;
+    border: 1px solid #aa8800;
+}
+QPushButton#btn_undo:hover { background-color: #5a4a10; }
+QPushButton#btn_undo:disabled { background-color: #2a2000; color: #665500; border-color: #443300; }
+
+/* Reset / Danger */
+QPushButton#btn_reset {
+    background-color: #5a1a1a;
+    color: #ffaaaa;
+    border: 1px solid #aa3333;
+}
+QPushButton#btn_reset:hover { background-color: #6a2a2a; }
+
+/* Point award — bright green */
+QPushButton#btn_point {
+    background-color: #1a5a1a;
+    color: #90ee90;
+    border: 1px solid #33aa33;
+}
+QPushButton#btn_point:hover { background-color: #2a6a2a; }
+QPushButton#btn_point:disabled { background-color: #0a2a0a; color: #336633; border-color: #224422; }
+
+/* Error — dark red */
+QPushButton#btn_error {
+    background-color: #7a1a1a;
+    color: #ffaaaa;
+    border: 1px solid #cc3333;
+}
+QPushButton#btn_error:hover { background-color: #8a2a2a; }
+QPushButton#btn_error:disabled { background-color: #3a0a0a; color: #663333; border-color: #442222; }
+
+/* Game End */
+QPushButton#btn_game_end {
+    background-color: #3a0a5a;
+    color: #d4aaff;
+    border: 1px solid #8844cc;
+}
+QPushButton#btn_game_end:hover { background-color: #4a1a6a; }
+
+/* Home screen big buttons */
+QPushButton#btn_home_new {
+    background-color: #4a90d9;
+    color: #ffffff;
+    border: none;
+    font-size: 20px;
+    font-weight: bold;
+    min-height: 70px;
+    border-radius: 12px;
+}
+QPushButton#btn_home_new:hover { background-color: #5aa0e9; }
+
+QPushButton#btn_home_history {
+    background-color: #2d2d4e;
+    color: #a0c4ff;
+    border: 1px solid #444488;
+    font-size: 18px;
+    min-height: 60px;
+    border-radius: 12px;
+}
+QPushButton#btn_home_history:hover { background-color: #3d3d6e; }
+
+/* ===== GroupBox ===== */
+QGroupBox {
+    border: 1px solid #444466;
+    border-radius: 6px;
+    margin-top: 10px;
+    padding: 4px 4px 4px 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #8888cc;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    top: -4px;
+    padding: 0 4px;
+    color: #8888cc;
+}
+
+/* ===== Line Edits ===== */
+QLineEdit {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    border: 1px solid #444466;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 15px;
+}
+QLineEdit:focus {
+    border-color: #6666bb;
+}
+
+/* ===== SpinBox ===== */
+QSpinBox {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    border: 1px solid #444466;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 15px;
+}
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #3d3d6e;
+    border: none;
+    width: 22px;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #5d5d9e;
+}
+
+/* ===== Combo Box ===== */
+QComboBox {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    border: 1px solid #444466;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+QComboBox QAbstractItemView {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    selection-background-color: #4a4a8e;
+}
+
+/* ===== Completer popup ===== */
+QAbstractItemView {
+    background-color: #2d2d4e;
+    color: #e0e0e0;
+    selection-background-color: #4a4a8e;
+    border: 1px solid #444466;
+}
+
+/* ===== List Widget ===== */
+QListWidget {
+    background-color: #16162a;
+    border: 1px solid #333355;
+    border-radius: 6px;
+}
+QListWidget::item {
+    padding: 10px 14px;
+    border-bottom: 1px solid #222244;
+}
+QListWidget::item:selected {
+    background-color: #333366;
+    color: #ffffff;
+}
+QListWidget::item:hover {
+    background-color: #252545;
+}
+
+/* Point sequence log on the tracker screen */
+QListWidget#point_log {
+    background-color: #12122a;
+    border: 1px solid #2a2a55;
+    font-size: 13px;
+}
+QListWidget#point_log::item {
+    padding: 4px 10px;
+    border-bottom: none;
+    color: #c8c8e0;
+}
+
+/* ===== Scroll Bar ===== */
+QScrollBar:vertical {
+    background: #1a1a2e;
+    width: 10px;
+}
+QScrollBar::handle:vertical {
+    background: #444466;
+    border-radius: 5px;
+}
+
+/* ===== Dialog ===== */
+QDialog {
+    background-color: #1e1e38;
+}
+
+/* ===== Overtime badge ===== */
+QLabel#ot_badge {
+    background-color: #7a1a1a;
+    color: #ffaaaa;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-weight: bold;
+    font-size: 14px;
+}

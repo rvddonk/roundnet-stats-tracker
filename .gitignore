@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Claude Code workspace
+.claude/
+
+# Local game data — contains real player names from recorded games.
+roundnet.db
+roundnet.db-journal
+exports/
+
+# Internal planning docs not intended for the public repo.
+CLAUDE.md
+ANALYSIS_UPDATE_PLAN.md
