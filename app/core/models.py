@@ -8,6 +8,17 @@ class GameConfig:
     hard_cap: int
     win_by: int = 2
 
+    # Tournament metadata (all optional — stored verbatim on the game row,
+    # never read by the scoring/engine code).
+    tournament: Optional[str] = None
+    tournament_stage: Optional[str] = None      # "Groups" | "Playoffs"
+    stage_part: Optional[str] = None            # group number or playoff round
+    bracket_type: Optional[str] = None          # "Upper" | "Consolation" (playoffs)
+    match_format: Optional[str] = None          # e.g. "Bo3 21(25)"
+    division: Optional[str] = None              # "Open" | "Women" | "Mix"
+    division_tier: Optional[str] = None         # "Pro" | "Contender" | "Other"
+    team_count: Optional[int] = None            # teams in this division
+
 
 @dataclass
 class GameState:

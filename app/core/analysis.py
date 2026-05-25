@@ -25,6 +25,7 @@ to the specific slot(s) that owned the serve/receive.
 from collections import defaultdict
 from typing import Optional
 
+from app.core.match_grouping import canonical_team_maps
 from app.core.rotation import SERVE_ROTATION, pair_at, next_rotation_index
 from app.db import events_repo, games_repo
 
@@ -115,6 +116,26 @@ def compute_game_stats(game_id: int) -> dict:
     return _compute(dict(game), events)
 
 
+def compute_flow(game_id: int) -> list[dict]:
+    """Return only the per-point flow list — for callers that need a
+    lightweight score-progression view (e.g. title-card thumbnails) without
+    paying for the full stats payload. Shape matches
+    `compute_game_stats(...)["flow"]`."""
+    game = games_repo.get_game(game_id)
+    if not game:
+        raise ValueError(f"Game {game_id} not found")
+    game = dict(game)
+    events = events_repo.list_for_game(game_id)
+    by_point: dict[int, list[dict]] = defaultdict(list)
+    for ev in events:
+        by_point[ev["point"]].append(ev)
+    for evs in by_point.values():
+        evs.sort(key=lambda e: e["seq_in_point"])
+    sorted_pts = sorted(by_point.keys())
+    winners = _determine_point_winners(by_point, game)
+    return _compute_flow(by_point, sorted_pts, winners)
+
+
 def compute_roundx_scores(game_id: int) -> dict:
     """Return only the RoundX block — for callers that don't need the full
     stats payload (e.g. the end-game dialog). Result shape matches
@@ -135,6 +156,244 @@ def compute_roundx_scores(game_id: int) -> dict:
     return _compute_roundx_from_events(
         game, by_point, sorted_pts, winners, point_pairs
     )
+
+
+def _aggregate_roundx(
+    per_game: list[dict], maps: list[dict] | None = None
+) -> dict:
+    """Combine multiple games' RoundX dicts into a single per-slot dict.
+    Raw scores and counted rallies sum across games; the scalar is re-derived
+    from the combined rally count so a longer match is still benchmarked
+    against the same 40-rally reference point.
+
+    `maps` is the canonical-team / canonical-slot mapping from
+    `match_grouping.canonical_team_maps`, one entry per game. When omitted
+    we derive it from the per-game `name` fields so the same player ends up
+    in one canonical bucket even if they swap sides between sets. Pass
+    explicit maps when the caller already has them — avoids recomputing.
+    """
+    slots = ["A1", "A2", "B1", "B2"]
+    if not per_game:
+        return {}
+
+    if maps is None:
+        per_game_names = [{s: rx[s]["name"] for s in slots} for rx in per_game]
+        maps = canonical_team_maps(per_game_names)
+
+    # Canonical names — anchored on the first game (which always maps
+    # identity, so its A1/A2/B1/B2 are the canonical roster).
+    name = {s: per_game[0][s]["name"] for s in slots}
+    total_rallies = 0
+    raw: dict[str, int] = {s: 0 for s in slots}
+    breakdowns: dict[str, list[tuple[str, int]]] = {s: [] for s in slots}
+
+    for rx, m in zip(per_game, maps):
+        sample = next(iter(rx.values()))
+        total_rallies += sample.get("counted_rallies", 0)
+        slot_map = m["slot_map"]
+        for in_slot in slots:
+            canon_slot = slot_map.get(in_slot, in_slot)
+            raw[canon_slot] += rx[in_slot]["raw_score"]
+            breakdowns[canon_slot].extend(rx[in_slot]["breakdown"])
+
+    if total_rallies > 0:
+        scalar = min(
+            ROUNDX_BENCHMARK_RALLIES / total_rallies, ROUNDX_SCALAR_CAP
+        )
+    else:
+        scalar = 1.0
+    rated = total_rallies >= ROUNDX_RATED_MIN_RALLIES
+
+    normalized = {s: round(raw[s] * scalar) for s in slots}
+    avg = round(sum(normalized.values()) / 4) if normalized else 0
+
+    return {
+        s: {
+            "slot": s,
+            "name": name[s],
+            "score": normalized[s],
+            "raw_score": raw[s],
+            "scalar": round(scalar, 3),
+            "rated": rated,
+            "counted_rallies": total_rallies,
+            "relative_to_avg": normalized[s] - avg,
+            "breakdown": sorted(breakdowns[s], key=lambda x: -abs(x[1])),
+        }
+        for s in slots
+    }
+
+
+def compute_match_roundx(game_ids: list[int]) -> dict:
+    """Lightweight per-match RoundX — used for the picker title card so the
+    grid doesn't have to load the full per-game stats payload."""
+    per_game = [compute_roundx_scores(gid) for gid in game_ids]
+    return _aggregate_roundx(per_game)
+
+
+def _sum_counters_into(target: dict, src: dict) -> None:
+    """Sum int counters and merge per-type fault dicts. Derived rates are
+    skipped — caller is expected to re-run `_finalize` on the result."""
+    fault_dict_keys = ("single_faults_by_type", "double_faults_by_type")
+    for k, v in src.items():
+        if k in fault_dict_keys:
+            for fk, fv in (v or {}).items():
+                target[k][fk] += fv
+        elif isinstance(v, int) and k in target and isinstance(target[k], int):
+            target[k] += v
+
+
+def compute_match_stats(game_ids: list[int]) -> dict:
+    """Aggregate per-game stats into a single match-level stats dict.
+
+    Output shape matches `compute_game_stats` so the analysis UI can render
+    it unchanged, with two additions on the `game` block: `series_score`
+    (A-wins, B-wins) and `game_results` (per-game summary list). The
+    aggregate `flow` is empty — per-game flow visualisations don't compose
+    meaningfully across separate games, so the title-card strip is skipped
+    on the match view.
+
+    Aggregation is keyed on **canonical team identity**, not raw in-game
+    slot. The first game's roster establishes the canonical sides; for
+    each later game the players are mapped back onto those canonical
+    sides via `match_grouping.canonical_team_maps`. This is what makes a
+    pairing that swaps `A1`↔`B1` between sets still get tallied as the
+    same team in series score, per-team stats, per-player stats, chain
+    analysis, and RoundX.
+    """
+    if not game_ids:
+        raise ValueError("compute_match_stats requires at least one game id")
+
+    per_game = [compute_game_stats(gid) for gid in game_ids]
+
+    # Canonical roster — anchored on game 1. Same four people across the
+    # match, but we don't assume they stay on the same side.
+    first_game = per_game[0]["game"]
+    names = first_game["names"]
+
+    maps = canonical_team_maps([g["game"]["names"] for g in per_game])
+
+    teams = {"A": _empty_counters(), "B": _empty_counters()}
+    players = {s: _empty_counters() for s in ("A1", "A2", "B1", "B2")}
+    for s, ps in players.items():
+        ps["name"] = names[s]
+        ps["slot"] = s
+
+    chain_rows_combined: dict[str, list[dict]] = {"A": [], "B": []}
+    total_points = 0
+
+    for g, m in zip(per_game, maps):
+        team_map = m["team_map"]
+        slot_map = m["slot_map"]
+        for in_team in ("A", "B"):
+            canon_team = team_map[in_team]
+            _sum_counters_into(teams[canon_team], g["teams"][in_team])
+            # Chain rows carry slot strings ("A1" etc.) inside their
+            # weak_*_players lists — those must be remapped to canonical
+            # slots before being merged, otherwise per-player chain stats
+            # will attribute a weak action to the wrong human.
+            for row in g.get("_chain_rows", {}).get(in_team, []):
+                chain_rows_combined[canon_team].append({
+                    **row,
+                    "weak_receive_players": [
+                        slot_map.get(s, s) for s in row["weak_receive_players"]
+                    ],
+                    "weak_set_players": [
+                        slot_map.get(s, s) for s in row["weak_set_players"]
+                    ],
+                    "weak_hit_players": [
+                        slot_map.get(s, s) for s in row["weak_hit_players"]
+                    ],
+                })
+        for in_slot in ("A1", "A2", "B1", "B2"):
+            canon_slot = slot_map.get(in_slot, in_slot)
+            _sum_counters_into(players[canon_slot], g["players"][in_slot])
+        total_points += g["game"]["total_points"]
+
+    for ts in teams.values():
+        _finalize(ts)
+    for ps in players.values():
+        _finalize(ps)
+    for slot, ps in players.items():
+        ps["opponent_hits"] = teams[slot[0]]["opponent_hits"]
+
+    chains = _compute_chains(chain_rows_combined, names)
+    roundx = _aggregate_roundx([g["roundx"] for g in per_game], maps)
+
+    for s in ("A1", "A2", "B1", "B2"):
+        rx = roundx[s]
+        players[s]["roundx_score"] = rx["score"]
+        players[s]["roundx_raw_score"] = rx["raw_score"]
+        players[s]["roundx_relative_to_avg"] = rx["relative_to_avg"]
+        players[s]["roundx_rated"] = rx["rated"]
+        players[s]["roundx_breakdown"] = rx["breakdown"]
+
+    a_wins = b_wins = 0
+    for g, m in zip(per_game, maps):
+        w = g["game"]["winner"]
+        if w is None:
+            continue
+        canon_w = m["team_map"].get(w, w)
+        if canon_w == "A":
+            a_wins += 1
+        elif canon_w == "B":
+            b_wins += 1
+    if a_wins > b_wins:
+        match_winner_ = "A"
+    elif b_wins > a_wins:
+        match_winner_ = "B"
+    else:
+        match_winner_ = None
+
+    # Per-game results in canonical orientation — final_score_a is always
+    # the canonical-A team's score, final_score_b the canonical-B team's,
+    # regardless of which side they played on that game.
+    game_results = []
+    canon_total_a = canon_total_b = 0
+    for g, m in zip(per_game, maps):
+        gg = g["game"]
+        sa = gg["final_score_a"]
+        sb = gg["final_score_b"]
+        if m["team_map"].get("A") == "B":
+            canon_sa, canon_sb = sb, sa
+        else:
+            canon_sa, canon_sb = sa, sb
+        canon_total_a += canon_sa
+        canon_total_b += canon_sb
+        w = gg["winner"]
+        canon_w = m["team_map"].get(w, w) if w else None
+        game_results.append({
+            "id": gg["id"],
+            "final_score_a": canon_sa,
+            "final_score_b": canon_sb,
+            "winner": canon_w,
+            "total_points": gg["total_points"],
+        })
+
+    return {
+        "game": {
+            "id": None,
+            "created_at": first_game["created_at"],
+            "ended_at": per_game[-1]["game"].get("ended_at"),
+            "names": names,
+            "team_a_players": first_game["team_a_players"],
+            "team_b_players": first_game["team_b_players"],
+            "final_score_a": canon_total_a,
+            "final_score_b": canon_total_b,
+            "winner": match_winner_,
+            "end_reason": None,
+            "target_score": first_game["target_score"],
+            "hard_cap": first_game["hard_cap"],
+            "total_points": total_points,
+            "is_match": True,
+            "series_score": (a_wins, b_wins),
+            "game_results": game_results,
+        },
+        "teams": teams,
+        "players": players,
+        "chains": chains,
+        "flow": [],
+        "roundx": roundx,
+    }
 
 
 def _team_of(slot: Optional[str]) -> Optional[str]:
@@ -749,6 +1008,8 @@ def _compute(game: dict, events: list[dict]) -> dict:
 
     chains = _compute_chains(chain_rows, names)
 
+    flow = _compute_flow(by_point, sorted_pts, winners)
+
     roundx = _compute_roundx_from_events(
         game, by_point, sorted_pts, winners, point_pairs
     )
@@ -781,8 +1042,59 @@ def _compute(game: dict, events: list[dict]) -> dict:
         "teams": teams,
         "players": players,
         "chains": chains,
+        "flow": flow,
         "roundx": roundx,
+        # Exposed for match-level aggregation — same shape as the input to
+        # `_compute_chains`. Not consumed by the analysis UI directly.
+        "_chain_rows": chain_rows,
     }
+
+
+# ---------------------------------------------------------------------------
+#  Game flow — per-point running score with break / OT annotations
+# ---------------------------------------------------------------------------
+
+def _compute_flow(by_point: dict, sorted_pts: list[int], winners: dict) -> list[dict]:
+    """One row per scored point. The visualization layer walks this list to
+    render the running score, mark breaks (serving team won), and tint OT
+    points. Abandoned points are excluded — they don't change the score.
+
+    `triggers_ot` is True for the point that fired `overtime_triggered`; the
+    point itself was played under normal rotation and isn't marked `in_ot`,
+    but the next point onwards is.
+    """
+    flow: list[dict] = []
+    score_a = 0
+    score_b = 0
+    seq = 0
+    in_ot = False
+    for p in sorted_pts:
+        events = by_point[p]
+        if not events:
+            continue
+        winner = winners.get(p)
+        if winner is None:
+            continue
+        srv_team = events[0]["serving_team"]
+        seq += 1
+        if winner == "A":
+            score_a += 1
+        else:
+            score_b += 1
+        triggered = any(e["event_type"] == "overtime_triggered" for e in events)
+        flow.append({
+            "point": seq,
+            "score_a": score_a,
+            "score_b": score_b,
+            "winner": winner,
+            "serving_team": srv_team,
+            "is_break": winner == srv_team,
+            "in_ot": in_ot,
+            "triggers_ot": triggered,
+        })
+        if triggered:
+            in_ot = True
+    return flow
 
 
 # ---------------------------------------------------------------------------

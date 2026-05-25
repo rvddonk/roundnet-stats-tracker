@@ -105,6 +105,14 @@ class GameEngine:
             first_receiver_slot=first_receiver_slot,
             starting_rotation_idx=rotation_idx,
             win_by=config.win_by,
+            tournament=config.tournament,
+            tournament_stage=config.tournament_stage,
+            stage_part=config.stage_part,
+            bracket_type=config.bracket_type,
+            match_format=config.match_format,
+            division=config.division,
+            division_tier=config.division_tier,
+            team_count=config.team_count,
         )
 
         self.state = GameState(

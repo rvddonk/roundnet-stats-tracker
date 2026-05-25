@@ -8,20 +8,30 @@ player). Column headers and chain-panel sub-headings always show the actual
 player names instead of "Team A / Team B".
 """
 
+import os
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel, QPushButton,
-    QComboBox, QFileDialog, QMessageBox, QScrollArea, QFrame, QButtonGroup,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+    QFileDialog, QMessageBox, QScrollArea, QFrame, QButtonGroup,
+    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QStackedWidget,
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QByteArray, QBuffer, QIODevice
 from PyQt6.QtGui import QColor, QBrush
 
-from app.config import FAULT_TYPES
-from app.core.analysis import compute_game_stats
+from app.config import EXPORTS_DIR, FAULT_TYPES
+from app.core.analysis import (
+    compute_flow, compute_game_stats, compute_match_roundx,
+    compute_match_stats, compute_roundx_scores,
+)
 from app.core.csv_import import import_game_from_csv, CsvImportError
+from app.core.html_export import render_analysis_html
+from app.core.match_grouping import group_games_into_matches
 from app.db import games_repo
+from app.ui.widgets.game_flow import GameFlowStrip, GameFlowChart
+from app.ui.widgets.game_card import GameCard, GameCardGrid
+from app.ui.widgets.match_card import MatchCard, MATCH_EDGE_COLOR
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +282,25 @@ def _stat_rows():
     ]
 
 
+def _grab_widget_b64(widget: QWidget, width: int, height: int) -> str:
+    """Render `widget` at the given pixel size to a base64-encoded PNG.
+
+    Used for embedding the Game Flow chart and strip into the HTML export
+    as data URIs — keeps the file self-contained. We resize the widget to
+    force a layout pass, then `grab()` it (works for paint-event-based
+    widgets without needing to show them on screen).
+    """
+    widget.resize(width, height)
+    widget.adjustSize()
+    widget.resize(width, height)  # second pass — adjustSize may have shrunk
+    pix = widget.grab()
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    pix.save(buf, "PNG")
+    return bytes(ba.toBase64()).decode("ascii")
+
+
 TABLE_STYLE = (
     "QTableWidget { background-color: #16162a; gridline-color: #2a2a55; "
     "alternate-background-color: #1a1a36; }"
@@ -291,8 +320,18 @@ class AnalysisScreen(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._games: list[dict] = []
+        self._entries: list[dict] = []
         self._current_stats: dict | None = None
         self._view_mode: str = "team"  # 'team' or 'player'
+        self._roundx_cache: dict[int, dict | None] = {}
+        self._flow_cache: dict[int, list[dict] | None] = {}
+        # When the user opens a match card, we cache the aggregate + per-game
+        # stats so toggle switches are instant. Cleared on reload.
+        self._current_match_games: list[int] | None = None
+        self._current_match_tab: str | None = None  # 'match' or game id as str
+        self._match_aggregate_cache: dict | None = None
+        self._match_per_game_cache: dict[int, dict] = {}
+        self._match_toggle_btns: dict[str, QPushButton] = {}
         self._core_container: QWidget | None = None
         self._fault_container: QWidget | None = None
         self._chain_container: QWidget | None = None
@@ -323,14 +362,24 @@ class AnalysisScreen(QWidget):
         top.addSpacing(100)
         root.addLayout(top)
 
-        # Picker bar
+        # Picker bar — actions only; game picking happens via cards below.
+        # "Change game" appears only while a game's analysis is on screen.
         picker = QHBoxLayout()
         picker.setSpacing(8)
-        picker.addWidget(QLabel("Game:"))
-        self._combo = QComboBox()
-        self._combo.setMinimumWidth(420)
-        self._combo.currentIndexChanged.connect(self._on_game_picked)
-        picker.addWidget(self._combo, stretch=1)
+        self._btn_change_game = QPushButton("← Change game")
+        self._btn_change_game.setMinimumHeight(34)
+        self._btn_change_game.clicked.connect(self._show_picker)
+        self._btn_change_game.hide()
+        picker.addWidget(self._btn_change_game)
+        picker.addStretch(1)
+        self._btn_export_html = QPushButton("📤  Export HTML…")
+        self._btn_export_html.setMinimumHeight(34)
+        self._btn_export_html.setToolTip(
+            "Save the current analysis as a self-contained HTML file"
+        )
+        self._btn_export_html.clicked.connect(self._on_export_html_clicked)
+        self._btn_export_html.hide()
+        picker.addWidget(self._btn_export_html)
         self._btn_import = QPushButton("📥  Import CSV…")
         self._btn_import.setMinimumHeight(34)
         self._btn_import.clicked.connect(self._on_import_clicked)
@@ -343,58 +392,315 @@ class AnalysisScreen(QWidget):
         picker.addWidget(self._btn_reload)
         root.addLayout(picker)
 
-        # Body — scrollable
+        # Match toggle row — visible only when a match (multi-game) is open.
+        # Hosts [Match] · [Game 1] · [Game 2] ... buttons that swap which
+        # set of stats the body renders.
+        self._match_toggle_wrap = QFrame()
+        self._match_toggle_wrap.setStyleSheet(
+            "QFrame { background-color: #16162a; border-radius: 6px; "
+            f"border: 1px solid {MATCH_EDGE_COLOR}; }}"
+        )
+        self._match_toggle_layout = QHBoxLayout(self._match_toggle_wrap)
+        self._match_toggle_layout.setContentsMargins(10, 6, 10, 6)
+        self._match_toggle_layout.setSpacing(8)
+        self._match_toggle_wrap.hide()
+        root.addWidget(self._match_toggle_wrap)
+
+        # Stacked body: 0 = card-grid picker, 1 = analysis details
+        self._stack = QStackedWidget()
+        root.addWidget(self._stack, stretch=1)
+
+        # Page 0 — card grid picker
+        self._cards = GameCardGrid()
+        self._stack.addWidget(self._cards)
+
+        # Page 1 — scrollable analysis body
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        root.addWidget(self._scroll, stretch=1)
-
         self._body = QWidget()
         self._body_layout = QVBoxLayout(self._body)
         self._body_layout.setContentsMargins(4, 4, 4, 4)
         self._body_layout.setSpacing(12)
         self._scroll.setWidget(self._body)
+        self._stack.addWidget(self._scroll)
 
-        self._show_empty()
+        self._show_picker()
 
     # ---------- Game list / picking ---------- #
 
     def _reload_games(self):
         self._games = games_repo.list_games()
-        self._combo.blockSignals(True)
-        self._combo.clear()
-        self._combo.addItem("— Select a game —", None)
-        for g in self._games:
-            self._combo.addItem(self._game_label(g), g["id"])
-        self._combo.blockSignals(False)
-        self._combo.setCurrentIndex(0)
-        self._show_empty()
+        self._entries = group_games_into_matches(self._games)
+        self._roundx_cache.clear()
+        self._flow_cache.clear()
+        self._match_aggregate_cache = None
+        self._match_per_game_cache.clear()
+        self._populate_card_grid()
+        self._show_picker()
 
-    @staticmethod
-    def _game_label(g: dict) -> str:
-        date = _fmt_date(g.get("created_at"))
-        a = f"{g.get('a1_name', 'A1')} & {g.get('a2_name', 'A2')}"
-        b = f"{g.get('b1_name', 'B1')} & {g.get('b2_name', 'B2')}"
-        return (
-            f"#{g['id']}  {date}  |  {a}  {g['final_score_a']}–"
-            f"{g['final_score_b']}  {b}"
-        )
+    def _populate_card_grid(self):
+        if not self._entries:
+            self._cards.show_empty(
+                "No finished games yet. Import a CSV or play a game to get started."
+            )
+            return
+        cards: list[QWidget] = []
+        for entry in self._entries:
+            if entry["type"] == "match":
+                ids = [g["id"] for g in entry["games"]]
+                card = MatchCard(entry, roundx=self._get_match_roundx(ids))
+                card.clicked.connect(self._on_match_card_clicked)
+            else:
+                g = entry["game"]
+                card = GameCard(
+                    g,
+                    roundx=self._compute_roundx(g["id"]),
+                    flow=self._get_flow(g["id"]),
+                    clickable=True,
+                )
+                card.clicked.connect(self._on_game_card_clicked)
+            cards.append(card)
+        self._cards.set_cards(cards)
 
-    def _on_game_picked(self, idx: int):
-        if idx <= 0:
-            self._show_empty()
-            return
-        game_id = self._combo.itemData(idx)
-        if game_id is None:
-            self._show_empty()
-            return
+    def _get_match_roundx(self, game_ids: list[int]) -> dict | None:
+        try:
+            return compute_match_roundx(game_ids)
+        except Exception:
+            return None
+
+    def _compute_roundx(self, game_id: int) -> dict | None:
+        if game_id in self._roundx_cache:
+            return self._roundx_cache[game_id]
+        try:
+            roundx = compute_roundx_scores(game_id)
+        except Exception:
+            roundx = None
+        self._roundx_cache[game_id] = roundx
+        return roundx
+
+    def _get_flow(self, game_id: int) -> list[dict] | None:
+        if game_id in self._flow_cache:
+            return self._flow_cache[game_id]
+        try:
+            flow = compute_flow(game_id)
+        except Exception:
+            flow = None
+        self._flow_cache[game_id] = flow
+        return flow
+
+    def _on_game_card_clicked(self, game_id: int):
         try:
             stats = compute_game_stats(game_id)
         except Exception as e:
             QMessageBox.critical(self, "Analysis failed", str(e))
             return
+        self._current_match_games = None
+        self._current_match_tab = None
+        self._match_aggregate_cache = None
+        self._match_per_game_cache = {}
         self._current_stats = stats
         self._render_stats(stats)
+        self._show_details()
+
+    def _on_match_card_clicked(self, game_ids: list[int]):
+        try:
+            aggregate = compute_match_stats(game_ids)
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis failed", str(e))
+            return
+        self._current_match_games = list(game_ids)
+        self._match_aggregate_cache = aggregate
+        self._match_per_game_cache = {}
+        self._build_match_toggle(aggregate["game"]["game_results"])
+        self._set_match_tab("match")
+        self._show_details()
+
+    def _build_match_toggle(self, game_results: list[dict]) -> None:
+        """(Re)build the [Match] · [Game 1] · [Game 2] ... toggle bar."""
+        while self._match_toggle_layout.count():
+            item = self._match_toggle_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._match_toggle_btns = {}
+
+        label = QLabel("Viewing:")
+        label.setStyleSheet("color: #aaaacc; font-size: 13px;")
+        self._match_toggle_layout.addWidget(label)
+
+        def make_btn(key: str, text: str, tooltip: str = "") -> QPushButton:
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setMinimumHeight(28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if tooltip:
+                btn.setToolTip(tooltip)
+            btn.setStyleSheet(
+                "QPushButton { background-color: #2d2d4e; color: #aaaacc; "
+                "border: 1px solid #444466; border-radius: 4px; padding: 4px 12px; }"
+                f"QPushButton:checked {{ background-color: {MATCH_EDGE_COLOR}; "
+                "color: #16162a; border-color: #ffd700; font-weight: bold; }"
+                "QPushButton:hover { border-color: #aabbff; }"
+            )
+            btn.clicked.connect(lambda _checked=False, k=key: self._set_match_tab(k))
+            return btn
+
+        btn_match = make_btn("match", "Match", "Aggregated stats across all games")
+        self._match_toggle_btns["match"] = btn_match
+        self._match_toggle_layout.addWidget(btn_match)
+
+        for i, gr in enumerate(game_results, start=1):
+            sa, sb = gr["final_score_a"], gr["final_score_b"]
+            text = f"Game {i}  {sa}–{sb}"
+            key = f"game:{gr['id']}"
+            btn = make_btn(key, text, f"Stats for game #{gr['id']}")
+            self._match_toggle_btns[key] = btn
+            self._match_toggle_layout.addWidget(btn)
+
+        self._match_toggle_layout.addStretch(1)
+
+    def _set_match_tab(self, key: str) -> None:
+        if not self._current_match_games or self._match_aggregate_cache is None:
+            return
+        self._current_match_tab = key
+        for k, btn in self._match_toggle_btns.items():
+            btn.setChecked(k == key)
+        if key == "match":
+            stats = self._match_aggregate_cache
+        else:
+            gid = int(key.split(":", 1)[1])
+            stats = self._match_per_game_cache.get(gid)
+            if stats is None:
+                try:
+                    stats = compute_game_stats(gid)
+                except Exception as e:
+                    QMessageBox.critical(self, "Analysis failed", str(e))
+                    return
+                self._match_per_game_cache[gid] = stats
+        self._current_stats = stats
+        self._render_stats(stats)
+
+    # ---------- HTML export ---------- #
+
+    def _on_export_html_clicked(self) -> None:
+        if not self._current_stats:
+            return
+        # For a match the export always covers the entire match — aggregate
+        # plus a panel per game — regardless of which tab the user is
+        # currently viewing. The filename and document are derived from the
+        # match aggregate, not the active per-game tab.
+        is_match_export = (
+            self._current_match_games is not None
+            and self._match_aggregate_cache is not None
+        )
+        base_stats = (
+            self._match_aggregate_cache if is_match_export
+            else self._current_stats
+        )
+        default_name = self._default_export_filename(base_stats)
+        default_path = str(EXPORTS_DIR / default_name)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export analysis as HTML",
+            default_path, "HTML files (*.html);;All files (*.*)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".html"):
+            path += ".html"
+
+        try:
+            if is_match_export:
+                html_text = self._build_match_html_export(base_stats)
+            else:
+                html_text = self._build_single_game_html_export(base_stats)
+            Path(path).write_text(html_text, encoding="utf-8")
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("HTML exported")
+        msg.setText(f"File saved:\n{path}")
+        open_btn = msg.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
+        if msg.clickedButton() == open_btn:
+            try:
+                os.startfile(os.path.dirname(path))
+            except Exception:
+                pass
+
+    def _default_export_filename(self, stats: dict) -> str:
+        g = stats["game"]
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        if g.get("is_match"):
+            ids = "-".join(str(gr["id"]) for gr in g["game_results"])
+            return f"match_{ids}_{stamp}.html"
+        return f"game_{g['id']}_{stamp}.html"
+
+    @staticmethod
+    def _render_flow_strip_png_b64(flow: list[dict]) -> str:
+        """Rasterize a fresh `GameFlowStrip` at 1100x60 — same widget as in
+        the in-app title card, just larger so the export looks crisp."""
+        strip = GameFlowStrip(flow)
+        return _grab_widget_b64(strip, 1100, 60)
+
+    @staticmethod
+    def _render_flow_chart_png_b64(stats: dict) -> str:
+        """Rasterize the same `GameFlowChart` shown in the in-app body for
+        the supplied stats payload."""
+        g = stats["game"]
+        team_a = " & ".join(g["team_a_players"])
+        team_b = " & ".join(g["team_b_players"])
+        chart = GameFlowChart(stats.get("flow") or [], team_a, team_b)
+        return _grab_widget_b64(chart, 1100, 380)
+
+    def _build_single_game_html_export(self, stats: dict) -> str:
+        flow = stats.get("flow") or []
+        strip_b64 = self._render_flow_strip_png_b64(flow) if flow else None
+        chart_b64 = self._render_flow_chart_png_b64(stats) if flow else None
+        return render_analysis_html(
+            stats,
+            flow_strip_png_b64=strip_b64,
+            flow_chart_png_b64=chart_b64,
+        )
+
+    def _build_match_html_export(self, aggregate: dict) -> str:
+        """Assemble a tabbed match export: aggregate panel + one panel per
+        game. Per-game stats are taken from the in-memory cache when
+        available, otherwise loaded on-demand.
+        """
+        game_ids = list(self._current_match_games or [])
+        # Look up canonical scores from the aggregate so the tab buttons
+        # match the in-app match-toggle bar (which uses canonical, not raw,
+        # scores for games where the pairing swapped sides).
+        canonical = {
+            gr["id"]: gr
+            for gr in aggregate["game"].get("game_results", [])
+        }
+        per_game_payloads: list[dict] = []
+        for i, gid in enumerate(game_ids, start=1):
+            gstats = self._match_per_game_cache.get(gid)
+            if gstats is None:
+                gstats = compute_game_stats(gid)
+                self._match_per_game_cache[gid] = gstats
+            flow = gstats.get("flow") or []
+            strip_b64 = self._render_flow_strip_png_b64(flow) if flow else None
+            chart_b64 = self._render_flow_chart_png_b64(gstats) if flow else None
+            gr = canonical.get(gid)
+            if gr is not None:
+                sa, sb = gr["final_score_a"], gr["final_score_b"]
+            else:
+                gg = gstats["game"]
+                sa, sb = gg["final_score_a"], gg["final_score_b"]
+            per_game_payloads.append({
+                "stats": gstats,
+                "flow_strip_png_b64": strip_b64,
+                "flow_chart_png_b64": chart_b64,
+                "label": f"Game {i}  {sa}–{sb}",
+            })
+        return render_analysis_html(aggregate, per_game=per_game_payloads)
 
     def _on_import_clicked(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -414,13 +720,16 @@ class AnalysisScreen(QWidget):
         QMessageBox.information(
             self, "Import successful",
             f"Imported as game #{new_id}. It now appears in history and "
-            "has been selected for analysis."
+            "has been opened for analysis."
         )
-        self._reload_games()
-        for i in range(self._combo.count()):
-            if self._combo.itemData(i) == new_id:
-                self._combo.setCurrentIndex(i)
-                break
+        self._games = games_repo.list_games()
+        self._entries = group_games_into_matches(self._games)
+        self._roundx_cache.clear()
+        self._flow_cache.clear()
+        self._match_aggregate_cache = None
+        self._match_per_game_cache.clear()
+        self._populate_card_grid()
+        self._on_game_card_clicked(new_id)
 
     # ---------- Body lifecycle ---------- #
 
@@ -431,8 +740,13 @@ class AnalysisScreen(QWidget):
             if w is not None:
                 w.deleteLater()
 
-    def _show_empty(self):
+    def _show_picker(self):
+        """Return to the card-grid picker view."""
         self._current_stats = None
+        self._current_match_games = None
+        self._current_match_tab = None
+        self._match_aggregate_cache = None
+        self._match_per_game_cache = {}
         self._core_container = None
         self._fault_container = None
         self._chain_container = None
@@ -440,18 +754,25 @@ class AnalysisScreen(QWidget):
         self._fault_group = None
         self._stats_row_layout = None
         self._clear_body()
-        msg = QLabel(
-            "Pick a finished game from the dropdown, or import a CSV "
-            "export to analyse."
-        )
-        msg.setStyleSheet("color: #8888aa; font-size: 15px;")
-        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._body_layout.addWidget(msg)
-        self._body_layout.addStretch()
+        self._btn_change_game.hide()
+        self._btn_export_html.hide()
+        self._match_toggle_wrap.hide()
+        self._stack.setCurrentIndex(0)
+
+    def _show_details(self):
+        """Switch to the rendered-analysis view."""
+        self._btn_change_game.show()
+        self._btn_export_html.show()
+        self._match_toggle_wrap.setVisible(self._current_match_games is not None)
+        self._stack.setCurrentIndex(1)
 
     def _render_stats(self, stats: dict):
         self._clear_body()
-        self._body_layout.addWidget(self._build_game_header(stats["game"]))
+        self._body_layout.addWidget(self._build_game_header(stats))
+        # Per-point flow visualization only makes sense for one game at a
+        # time; the match aggregate view passes an empty flow list.
+        if stats.get("flow"):
+            self._body_layout.addWidget(self._build_flow_panel(stats))
         self._body_layout.addWidget(self._build_roundx_panel(stats))
         self._body_layout.addWidget(self._build_view_toggle())
 
@@ -730,20 +1051,33 @@ class AnalysisScreen(QWidget):
 
     # ---------- Game header ---------- #
 
-    def _build_game_header(self, game: dict) -> QWidget:
+    def _build_game_header(self, stats: dict) -> QWidget:
+        game = stats["game"]
+        is_match = bool(game.get("is_match"))
+        flow = stats.get("flow") or []
         frame = QFrame()
+        border = f"border: 1px solid {MATCH_EDGE_COLOR};" if is_match else ""
         frame.setStyleSheet(
-            "QFrame { background-color: #16162a; border-radius: 10px; }"
+            f"QFrame {{ background-color: #16162a; border-radius: 10px; {border} }}"
         )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
 
-        title = QLabel(
-            f"Game #{game['id']}  —  {_fmt_date(game['created_at'])}"
-        )
+        if is_match:
+            tournament = (game.get("tournament") or "Match")
+            n_games = len(game["game_results"])
+            title_text = (
+                f"Match  —  {n_games} games  ·  starting "
+                f"{_fmt_date(game['created_at'])}"
+            )
+            title_color = MATCH_EDGE_COLOR
+        else:
+            title_text = f"Game #{game['id']}  —  {_fmt_date(game['created_at'])}"
+            title_color = "#a0c4ff"
+        title = QLabel(title_text)
         title.setStyleSheet(
-            "font-size: 18px; font-weight: bold; color: #a0c4ff;"
+            f"font-size: 18px; font-weight: bold; color: {title_color};"
         )
         layout.addWidget(title)
 
@@ -753,16 +1087,76 @@ class AnalysisScreen(QWidget):
             f"{(team_a if game['winner'] == 'A' else team_b)} won"
             if game["winner"] else "No declared winner"
         )
-        sub = QLabel(
-            f"<b>{team_a}</b>  vs  <b>{team_b}</b>"
-            f"<br><b>Final score:</b> "
-            f"{game['final_score_a']} – {game['final_score_b']}  "
-            f"({winner_txt}, {game['total_points']} points played)"
-        )
+
+        if is_match:
+            a_wins, b_wins = game["series_score"]
+            results_bits = []
+            for i, gr in enumerate(game["game_results"], start=1):
+                w = gr["winner"]
+                a_col = "#7adb7a" if w == "A" else ("#8888aa" if w == "B" else "#e0e0e0")
+                b_col = "#7adb7a" if w == "B" else ("#8888aa" if w == "A" else "#e0e0e0")
+                results_bits.append(
+                    f"<span style='color:#aaaacc;'>G{i}</span> "
+                    f"<span style='color:{a_col}; font-weight:bold;'>{gr['final_score_a']}</span>"
+                    f"<span style='color:#8888aa;'>-</span>"
+                    f"<span style='color:{b_col}; font-weight:bold;'>{gr['final_score_b']}</span>"
+                )
+            results_line = " &nbsp;·&nbsp; ".join(results_bits)
+            sub = QLabel(
+                f"<b>{team_a}</b>  vs  <b>{team_b}</b>"
+                f"<br><b>Series:</b> {a_wins} – {b_wins}  "
+                f"({winner_txt}, {game['total_points']} points played across "
+                f"{n_games} games)"
+                f"<br><span style='color:#aaaacc; font-size:12px;'>{results_line}</span>"
+            )
+        else:
+            sub = QLabel(
+                f"<b>{team_a}</b>  vs  <b>{team_b}</b>"
+                f"<br><b>Final score:</b> "
+                f"{game['final_score_a']} – {game['final_score_b']}  "
+                f"({winner_txt}, {game['total_points']} points played)"
+            )
         sub.setTextFormat(Qt.TextFormat.RichText)
         sub.setStyleSheet("color: #ddddee;")
         layout.addWidget(sub)
+
+        # Compact flow strip — only meaningful for a single game.
+        if flow:
+            strip = GameFlowStrip(flow)
+            strip.setStyleSheet(
+                "background-color: #12122a; border-radius: 6px;"
+            )
+            layout.addWidget(strip)
         return frame
+
+    # ---------- Game-flow panel ---------- #
+
+    def _build_flow_panel(self, stats: dict) -> QWidget:
+        flow = stats.get("flow") or []
+        game = stats["game"]
+        team_a = " & ".join(game["team_a_players"])
+        team_b = " & ".join(game["team_b_players"])
+
+        group = QGroupBox("Game Flow")
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(10, 18, 10, 10)
+        layout.setSpacing(6)
+
+        intro = QLabel(
+            "Cumulative score per team across every point. "
+            "Filled <b>circles</b> mark <span style='color:#ffd700'>breaks</span> — "
+            "points where the serving team scored. The shaded band between "
+            "the lines is tinted in the leader's colour, so runs of one team "
+            "show as a stretch of their colour."
+        )
+        intro.setTextFormat(Qt.TextFormat.RichText)
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #aaaacc; font-size: 12px;")
+        layout.addWidget(intro)
+
+        chart = GameFlowChart(flow, team_a, team_b)
+        layout.addWidget(chart)
+        return group
 
     # ---------- Column resolution ---------- #
 

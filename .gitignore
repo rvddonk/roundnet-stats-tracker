@@ -22,6 +22,9 @@ roundnet.db
 roundnet.db-journal
 exports/
 
+# Runtime log
+_app_log.txt
+
 # Internal planning docs not intended for the public repo.
 CLAUDE.md
 ANALYSIS_UPDATE_PLAN.md

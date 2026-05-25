@@ -78,6 +78,19 @@ QPushButton:focus {
     border-color: #aabbff;
 }
 
+/* Checked state for toggle/radio-style QPushButtons.
+   Screens that want a different look (analysis view-mode, tournament
+   collapse header) override this with an inline stylesheet. */
+QPushButton:checked {
+    background-color: #4a90d9;
+    color: #ffffff;
+    border-color: #5aa0e9;
+}
+QPushButton:checked:hover {
+    background-color: #5aa0e9;
+    border-color: #aabbff;
+}
+
 QPushButton:disabled {
     background-color: #1e1e2e;
     color: #555577;

@@ -26,7 +26,26 @@ class Database:
         with self._lock:
             conn = self._get_conn()
             conn.executescript(sql)
+            self._migrate(conn)
             conn.commit()
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Additive column migrations for older DBs created before a column existed."""
+        games_additions = [
+            ("tournament", "TEXT"),
+            ("tournament_stage", "TEXT"),
+            ("stage_part", "TEXT"),
+            ("bracket_type", "TEXT"),
+            ("match_format", "TEXT"),
+            ("division", "TEXT"),
+            ("division_tier", "TEXT"),
+            ("team_count", "INTEGER"),
+            ("date_updated", "TEXT"),
+        ]
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(games)").fetchall()}
+        for col, typ in games_additions:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE games ADD COLUMN {col} {typ}")
 
     def execute(self, sql: str, params=()) -> sqlite3.Cursor:
         with self._lock:

@@ -75,7 +75,20 @@ class MainWindow(QMainWindow):
             self._screens["history"].deleteLater()
         screen = HistoryScreen()
         screen.back_requested.connect(self._go_home)
+        screen.edit_requested.connect(self._go_edit_game)
         self._screens["history"] = screen
+        self._stack.addWidget(screen)
+        self._stack.setCurrentWidget(screen)
+
+    def _go_edit_game(self, game_id: int):
+        from app.ui.edit_game_screen import EditGameScreen
+        if "edit_game" in self._screens:
+            self._stack.removeWidget(self._screens["edit_game"])
+            self._screens["edit_game"].deleteLater()
+        screen = EditGameScreen(game_id)
+        screen.back_requested.connect(self._go_history)
+        screen.saved.connect(self._go_history)
+        self._screens["edit_game"] = screen
         self._stack.addWidget(screen)
         self._stack.setCurrentWidget(screen)
 

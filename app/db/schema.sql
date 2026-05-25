@@ -21,7 +21,18 @@ CREATE TABLE IF NOT EXISTS games (
     final_score_a         INTEGER NOT NULL DEFAULT 0,
     final_score_b         INTEGER NOT NULL DEFAULT 0,
     winner_team           TEXT,
-    end_reason            TEXT
+    end_reason            TEXT,
+    -- Tournament metadata (all optional except match_format,
+    -- which is the source of truth for target/hard_cap)
+    tournament            TEXT,
+    tournament_stage      TEXT,   -- 'Groups' | 'Playoffs'
+    stage_part            TEXT,   -- groups: "1","2",...; playoffs: 'Ro32'|'Ro16'|'Ro8'|'Semi'|'Final'
+    bracket_type          TEXT,   -- 'Upper' | 'Consolation' (playoffs only)
+    match_format          TEXT,   -- e.g. 'Bo3 21(25)', 'Bo5 15'
+    division              TEXT,   -- 'Open' | 'Women' | 'Mix'
+    division_tier         TEXT,   -- 'Pro' | 'Contender' | 'Other'
+    team_count            INTEGER, -- total teams in the division (optional)
+    date_updated          TEXT    -- last time metadata was edited via the history screen
 );
 
 CREATE TABLE IF NOT EXISTS events (
