@@ -821,6 +821,8 @@ def _compute(game: dict, events: list[dict]) -> dict:
 
         teams[srv_team]["points_served"] += 1
         teams[rcv_team]["points_received"] += 1
+        if server_slot:
+            players[server_slot]["points_served"] += 1
 
         rcv_team_received = False
         srv_team_touched_during_rally = False

@@ -272,11 +272,11 @@ def _stat_rows():
          lambda s: s["set_errors_total"] == 0,
          True),
         ("First Fault",
-         lambda s: _fmt_ratio(s["faults_total"], s["total_serves"]),
-         lambda s: s["faults_total"] == 0,
+         lambda s: _fmt_ratio(s["single_faults_total"], s["points_served"]),
+         lambda s: s["single_faults_total"] == 0,
          True),
         ("Double Faults",
-         lambda s: _fmt_ratio(s["double_faults_total"], s["total_serves"]),
+         lambda s: _fmt_ratio(s["double_faults_total"], s["points_served"]),
          lambda s: s["double_faults_total"] == 0,
          True),
     ]
@@ -1261,7 +1261,7 @@ class AnalysisScreen(QWidget):
 
             for c, (_, src) in enumerate(columns, start=1):
                 if label == "First Faults":
-                    value = src["faults_total"]
+                    value = src["single_faults_total"]
                 elif label == "Double Faults":
                     value = src["double_faults_total"]
                 else:

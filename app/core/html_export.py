@@ -176,10 +176,10 @@ def _stat_rows() -> list[tuple]:
          lambda s: ("ratio", s["set_errors_total"], s["sets"]),
          lambda s: s["set_errors_total"] == 0),
         ("First Fault",
-         lambda s: ("ratio", s["faults_total"], s["total_serves"]),
-         lambda s: s["faults_total"] == 0),
+         lambda s: ("ratio", s["single_faults_total"], s["points_served"]),
+         lambda s: s["single_faults_total"] == 0),
         ("Double Faults",
-         lambda s: ("ratio", s["double_faults_total"], s["total_serves"]),
+         lambda s: ("ratio", s["double_faults_total"], s["points_served"]),
          lambda s: s["double_faults_total"] == 0),
     ]
 
@@ -668,7 +668,7 @@ def _render_fault_table(
         cells = []
         for _name, src in columns:
             if label == "First Faults":
-                value = src["faults_total"]
+                value = src["single_faults_total"]
             elif label == "Double Faults":
                 value = src["double_faults_total"]
             else:
