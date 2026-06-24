@@ -26,6 +26,7 @@ from app.core.analysis import (
     compute_match_stats, compute_roundx_scores,
 )
 from app.core.csv_import import import_game_from_csv, CsvImportError
+from app.core.core_stats_definitions import CORE_STAT_DEFINITIONS
 from app.core.html_export import render_analysis_html
 from app.core.match_grouping import group_games_into_matches
 from app.db import games_repo
@@ -276,7 +277,6 @@ def _stat_rows():
             lambda s: s["weak_hits"] == 0,
          True),
     ]
-
 
 def _grab_widget_b64(widget: QWidget, width: int, height: int) -> str:
     """Render `widget` at the given pixel size to a base64-encoded PNG.
@@ -1197,8 +1197,12 @@ class AnalysisScreen(QWidget):
         for r, row in enumerate(rows):
             label, getter, is_zero, _is_pct = row[0], row[1], row[2], row[3]
             tbl.setRowHeight(r, row_h)
-            lbl_item = _cell(label)
+            definition = CORE_STAT_DEFINITIONS.get(label)
+            label_text = f"{label}  ⓘ" if definition else label
+            lbl_item = _cell(label_text)
             lbl_item.setForeground(QBrush(LABEL_COLOR))
+            if definition:
+                lbl_item.setToolTip(definition)
             tbl.setItem(r, 0, lbl_item)
             for c, (_, src) in enumerate(columns, start=1):
                 color = DIM_COLOR if is_zero(src) else HOT_COLOR

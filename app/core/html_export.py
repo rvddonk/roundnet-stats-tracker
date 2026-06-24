@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.config import FAULT_TYPES
+from app.core.core_stats_definitions import CORE_STAT_DEFINITIONS
 
 
 # Mirrors the in-app palette so the exported file matches the screen.
@@ -136,36 +137,18 @@ def _stat_rows() -> list[tuple]:
         ("Aces / Aced",
          lambda s: ("pair", s["aces"], s["aced"]),
          lambda s: s["aces"] == 0 and s["aced"] == 0),
-        ("Receive",
-         lambda s: ("ratio", s["good_receives"], s["total_receives"]),
-         lambda s: s["good_receives"] == 0),
-        ("Weak Receives",
-         lambda s: ("ratio", s["weak_receives"], s["total_receives"]),
-         lambda s: s["weak_receives"] == 0),
-        ("Clean Side-outs",
-         lambda s: ("ratio", s["clean_side_outs"], s["total_receives"]),
-         lambda s: s["clean_side_outs"] == 0),
-        ("Side-outs",
-         lambda s: ("ratio", s["side_outs"], s["total_receives"]),
-         lambda s: s["side_outs"] == 0),
-        ("Holds",
-         lambda s: ("ratio", s["holds"], s["total_receives"]),
-         lambda s: s["holds"] == 0),
         ("Breaks/Broken",
          lambda s: ("pair", s["breaks_for"], s["breaks_against"]),
          lambda s: s["breaks_for"] == 0 and s["breaks_against"] == 0),
-        ("Touches",
-         lambda s: ("ratio", s["total_touches"], s["opponent_hits"]),
-         lambda s: s["total_touches"] == 0),
-        ("Weak Touches",
-         lambda s: ("ratio", s["weak_touches"], s["total_touches"]),
-         lambda s: s["weak_touches"] == 0),
-        ("Weak Sets",
-         lambda s: ("ratio", s["weak_sets"], s["sets"]),
-         lambda s: s["weak_sets"] == 0),
-        ("Weak Hits",
-         lambda s: ("ratio", s["weak_hits"], s["hits"]),
-         lambda s: s["weak_hits"] == 0),
+        ("Holds",
+         lambda s: ("ratio", s["holds"], s["total_receives"]),
+         lambda s: s["holds"] == 0),
+        ("Side-outs",
+         lambda s: ("ratio", s["side_outs"], s["total_receives"]),
+         lambda s: s["side_outs"] == 0),
+        ("Clean Side-outs",
+         lambda s: ("ratio", s["clean_side_outs"], s["total_receives"]),
+         lambda s: s["clean_side_outs"] == 0),
         ("Errors",
          lambda s: ("plain", s["total_errors"]),
          lambda s: s["total_errors"] == 0),
@@ -180,8 +163,32 @@ def _stat_rows() -> list[tuple]:
          lambda s: s["single_faults_total"] == 0),
         ("Double Faults",
          lambda s: ("ratio", s["double_faults_total"], s["points_served"]),
-         lambda s: s["double_faults_total"] == 0),
+            lambda s: s["double_faults_total"] == 0),
+           ("Touches",
+            lambda s: ("ratio", s["total_touches"], s["opponent_hits"]),
+            lambda s: s["total_touches"] == 0),
+           ("Weak Touches",
+            lambda s: ("ratio", s["weak_touches"], s["total_touches"]),
+            lambda s: s["weak_touches"] == 0),
+           ("Weak Receives",
+            lambda s: ("ratio", s["weak_receives"], s["total_receives"]),
+            lambda s: s["weak_receives"] == 0),
+           ("Weak Sets",
+            lambda s: ("ratio", s["weak_sets"], s["sets"]),
+            lambda s: s["weak_sets"] == 0),
+           ("Weak Hits",
+            lambda s: ("ratio", s["weak_hits"], s["hits"]),
+            lambda s: s["weak_hits"] == 0),
     ]
+
+def _core_stat_label_html(label: str) -> str:
+    definition = CORE_STAT_DEFINITIONS.get(label)
+    if not definition:
+        return _esc(label)
+    return (
+        f'{_esc(label)} '
+        f'<span class="stat-help" title="{_esc(definition)}">ⓘ</span>'
+    )
 
 
 # --------------------------------------------------------------------- #
@@ -596,14 +603,18 @@ def _render_core_stats(stats: dict) -> str:
     return (
         '<section class="card">'
         '<h2>Core stats</h2>'
-        + _render_core_stats_table("Per team", _columns_team(stats))
-        + _render_core_stats_table("Per player", _columns_player(stats))
+        + _render_core_stats_table(
+            "Per team", _columns_team(stats), include_help=True
+        )
+        + _render_core_stats_table(
+            "Per player", _columns_player(stats), include_help=True
+        )
         + '</section>'
     )
 
 
 def _render_core_stats_table(
-    sub_label: str, columns: list[tuple[str, dict]],
+    sub_label: str, columns: list[tuple[str, dict]], include_help: bool = True,
 ) -> str:
     rows = _stat_rows()
     header_cells = "".join(f"<th>{_esc(c[0])}</th>" for c in columns)
@@ -625,9 +636,8 @@ def _render_core_stats_table(
             cells.append(
                 f'<td style="color:{color}; font-weight:{weight}">{cell_html}</td>'
             )
-        body.append(
-            f'<tr><td class="label">{_esc(label)}</td>{"".join(cells)}</tr>'
-        )
+        label_html = _core_stat_label_html(label) if include_help else _esc(label)
+        body.append(f'<tr><td class="label">{label_html}</td>{"".join(cells)}</tr>')
     return (
         f'<h3>{_esc(sub_label)}</h3>'
         '<table class="stats-table">'
@@ -936,6 +946,13 @@ footer {{
     color: {p["label"]};
     text-align: left;
     font-weight: 500;
+}}
+.stats-table td.label .stat-help {{
+    margin-left: 4px;
+    color: {p["summary"]};
+    font-weight: 600;
+    font-size: 11px;
+    cursor: help;
 }}
 .stats-table .sub {{
     color: {p["dim2"]}; font-size: 11px;
