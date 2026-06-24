@@ -2,7 +2,7 @@
 
 CORE_STAT_DEFINITIONS = {
     "Aces / Aced": (
-        "Aces: serves that win the point immediately, without the setter being able to give a set. "
+        "Aces: serves that win the point immediately, without allowing the setter to make a viable set. "
     ),
     "Breaks/Broken": (
         "Breaks: points won by the serving team. "
@@ -10,15 +10,15 @@ CORE_STAT_DEFINITIONS = {
     ),
     "Holds": (
         "Receiving team won the point after a receive happened. "
-        "Shown as holds / total_receives."
+        "Shown as holds / total_receives (excluding aces)."
     ),
     "Side-outs": (
         "Holds where the serving team never got a hit in that rally. "
-        "Shown as side_outs / total_receives."
+        "Shown as side_outs / total_receives (excluding aces)."
     ),
     "Clean Side-outs": (
         "Side-outs where the serving team never touched the ball at all. "
-        "Shown as clean_side_outs / total_receives."
+        "Shown as clean_side_outs / total_receives (excluding aces)."
     ),
     "Errors": (
         "Total attributed hit/set errors. "
@@ -30,7 +30,7 @@ CORE_STAT_DEFINITIONS = {
     "First Fault": "single_faults_total / points_served.",
     "Touches": "total_touches / opponent_hits.",
     "Weak Touches": "weak_touches / total_touches.",
-    "Weak Receives": "weak_receives / total_receives.",
+    "Weak Receives": "weak_receives / total_receives (excluding aces).",
     "Weak Sets": "weak_sets / sets.",
     "Weak Hits": "weak_hits / hits.",
 }
