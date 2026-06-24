@@ -251,13 +251,13 @@ def _stat_rows():
          lambda s: _fmt_ratio(s["set_errors_total"], s["sets"]),
          lambda s: s["set_errors_total"] == 0,
          True),
-        ("First Fault",
-         lambda s: _fmt_ratio(s["single_faults_total"], s["points_served"]),
-         lambda s: s["single_faults_total"] == 0,
-         True),
         ("Double Faults",
          lambda s: _fmt_ratio(s["double_faults_total"], s["points_served"]),
          lambda s: s["double_faults_total"] == 0,
+         True),
+        ("First Fault",
+         lambda s: _fmt_ratio(s["single_faults_total"], s["points_served"]),
+         lambda s: s["single_faults_total"] == 0,
             True),
            ("Touches",
             lambda s: _fmt_ratio(s["total_touches"], s["opponent_hits"]),
@@ -1285,7 +1285,7 @@ class AnalysisScreen(QWidget):
                 if k not in fault_types:
                     fault_types.append(k)
 
-        SUMMARY_LABELS = ("First Faults", "Double Faults")
+        SUMMARY_LABELS = ("Double Faults", "First Faults")
         row_labels = fault_types + list(SUMMARY_LABELS)
 
         tbl = QTableWidget()
@@ -1313,10 +1313,10 @@ class AnalysisScreen(QWidget):
             tbl.setItem(r, 0, lbl_item)
 
             for c, (_, src) in enumerate(columns, start=1):
-                if label == "First Faults":
-                    value = src["single_faults_total"]
-                elif label == "Double Faults":
+                if label == "Double Faults":
                     value = src["double_faults_total"]
+                elif label == "First Faults":
+                    value = src["single_faults_total"]
                 else:
                     value = src["all_faults_by_type"].get(label, 0)
 

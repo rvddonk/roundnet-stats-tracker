@@ -158,12 +158,12 @@ def _stat_rows() -> list[tuple]:
         ("Set Errors",
          lambda s: ("ratio", s["set_errors_total"], s["sets"]),
          lambda s: s["set_errors_total"] == 0),
-        ("First Fault",
-         lambda s: ("ratio", s["single_faults_total"], s["points_served"]),
-         lambda s: s["single_faults_total"] == 0),
         ("Double Faults",
          lambda s: ("ratio", s["double_faults_total"], s["points_served"]),
-            lambda s: s["double_faults_total"] == 0),
+         lambda s: s["double_faults_total"] == 0),
+        ("First Fault",
+         lambda s: ("ratio", s["single_faults_total"], s["points_served"]),
+            lambda s: s["single_faults_total"] == 0),
            ("Touches",
             lambda s: ("ratio", s["total_touches"], s["opponent_hits"]),
             lambda s: s["total_touches"] == 0),
@@ -696,7 +696,7 @@ def _render_fault_table(
             if k not in fault_types:
                 fault_types.append(k)
 
-    SUMMARY = ("First Faults", "Double Faults")
+    SUMMARY = ("Double Faults", "First Faults")
     row_labels = fault_types + list(SUMMARY)
 
     header_cells = "".join(f"<th>{_esc(c[0])}</th>" for c in columns)
@@ -707,10 +707,10 @@ def _render_fault_table(
         lbl_weight = "bold" if is_summary else "normal"
         cells = []
         for _name, src in columns:
-            if label == "First Faults":
-                value = src["single_faults_total"]
-            elif label == "Double Faults":
+            if label == "Double Faults":
                 value = src["double_faults_total"]
+            elif label == "First Faults":
+                value = src["single_faults_total"]
             else:
                 value = src["all_faults_by_type"].get(label, 0)
             color = PALETTE["dim"] if value == 0 else _heat_color(value)
