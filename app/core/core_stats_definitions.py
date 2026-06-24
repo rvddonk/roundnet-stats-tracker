@@ -28,6 +28,11 @@ CORE_STAT_DEFINITIONS = {
     "Set Errors": "(set_errors + weak_set_errors) / sets.",
     "Double Faults": "double_faults_total / points_served.",
     "First Fault": "single_faults_total / points_served.",
+    "Finish Hits": (
+        "Hits that finished the rally for the hitter's team: either a direct "
+        "point with no opponent touch, or opponent touch(es) with no opponent "
+        "hit after. Shown as finish_hits / hits."
+    ),
     "Touches": "total_touches / opponent_hits.",
     "Weak Touches": "weak_touches / total_touches.",
     "Weak Receives": "weak_receives / total_receives (excluding aces).",

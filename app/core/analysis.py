@@ -709,6 +709,7 @@ def _empty_counters() -> dict:
         "weak_sets": 0,
         "hits": 0,
         "weak_hits": 0,
+        "finish_hits": 0,
         "single_faults_total": 0,
         "double_faults_total": 0,
         "single_faults_by_type": defaultdict(int),
@@ -756,6 +757,7 @@ def _finalize(stats: dict) -> dict:
     )
     stats["weak_set_ratio"] = _safe_pct(stats["weak_sets"], stats["sets"])
     stats["weak_hit_ratio"] = _safe_pct(stats["weak_hits"], stats["hits"])
+    stats["finish_hit_ratio"] = _safe_pct(stats["finish_hits"], stats["hits"])
     stats["weak_receive_ratio"] = _safe_pct(
         stats["weak_receives"], stats["total_receives"]
     )
@@ -995,6 +997,46 @@ def _compute(game: dict, events: list[dict]) -> dict:
                 "lost": winner != team,
                 "won": winner == team,
             })
+
+        # Finish hits (per hit event): count a hit when the hitter's team wins
+        # the point and the opponent never records a hit after that hit.
+        #
+        # Two accepted endings:
+        #   1) Direct point (no opponent defensive touch, then a `point` event).
+        #   2) Opponent gets a defensive touch, but still no opponent hit after.
+        #
+        # This intentionally compares against `hits` as denominator (which
+        # includes both `hit` and `weak_hit`).
+        for j, ev in enumerate(pt_events):
+            if ev["event_type"] not in HIT_EVENTS:
+                continue
+            slot = ev["player"]
+            if not slot:
+                continue
+            hit_team = _team_of(slot)
+            if hit_team is None or hit_team != winner:
+                continue
+            opp = _opp(hit_team)
+            tail = pt_events[j + 1:]
+            opp_hit_after = any(
+                e["event_type"] in HIT_EVENTS and _team_of(e["player"]) == opp
+                for e in tail
+            )
+            if opp_hit_after:
+                continue
+
+            opp_touch_after = any(
+                e["event_type"] in TOUCH_EVENTS and _team_of(e["player"]) == opp
+                for e in tail
+            )
+            if not opp_touch_after:
+                # No defensive touch path qualifies only as a direct point.
+                is_direct_point = any(e["event_type"] == "point" for e in tail)
+                if not is_direct_point:
+                    continue
+
+            teams[hit_team]["finish_hits"] += 1
+            players[slot]["finish_hits"] += 1
 
     # Per-player Total Touches % uses the opposing TEAM's hits as its
     # denominator, so total_touches_pct sums sensibly across the two
