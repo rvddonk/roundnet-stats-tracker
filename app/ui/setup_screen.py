@@ -135,8 +135,11 @@ class SetupScreen(QWidget):
         box.setLayout(form)
 
         known = all_names()
-        for slot, label in [(slot1, "Player 1 (serves first)"),
-                            (slot2, "Player 2")]:
+        player1_label = (
+            "Player 1 (serves first)" if slot1.startswith("A")
+            else "Player 1 (receives first)"
+        )
+        for slot, label in [(slot1, player1_label), (slot2, "Player 2")]:
             inp = QLineEdit()
             inp.setPlaceholderText("Enter name…")
             inp.setMinimumWidth(0)
