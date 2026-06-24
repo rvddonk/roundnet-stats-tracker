@@ -245,6 +245,36 @@ def render_analysis_html(
 """
 
 
+def render_player_core_stats_html(stats: dict) -> str:
+    """Build a compact self-contained HTML document with only the
+    per-player Core stats table."""
+    title = f"{_doc_title(stats)} · Core stats (per player)"
+    body = (
+        _render_header(stats, None)
+        + '<section class="card">'
+        + '<h2>Core stats — per player</h2>'
+        + _render_core_stats_table(
+            "Per player", _columns_player(stats), include_help=True
+        )
+        + '</section>'
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{_esc(title)}</title>
+<style>{_css()}</style>
+</head>
+<body>
+<main class="container">
+{body}
+<footer>Exported {_esc(datetime.now().strftime("%Y-%m-%d %H:%M"))} · Roundnet Stats Tracker</footer>
+</main>
+</body>
+</html>
+"""
+
+
 def _render_panel(
     stats: dict,
     flow_strip_png_b64: Optional[str],

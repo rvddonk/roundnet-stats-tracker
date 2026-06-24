@@ -27,7 +27,10 @@ from app.core.analysis import (
 )
 from app.core.csv_import import import_game_from_csv, CsvImportError
 from app.core.core_stats_definitions import CORE_STAT_DEFINITIONS
-from app.core.html_export import render_analysis_html
+from app.core.html_export import (
+    render_analysis_html,
+    render_player_core_stats_html,
+)
 from app.core.match_grouping import group_games_into_matches
 from app.db import games_repo
 from app.ui.widgets.game_flow import GameFlowStrip, GameFlowChart
@@ -376,6 +379,18 @@ class AnalysisScreen(QWidget):
         self._btn_export_html.clicked.connect(self._on_export_html_clicked)
         self._btn_export_html.hide()
         picker.addWidget(self._btn_export_html)
+        self._btn_export_core_players_html = QPushButton(
+            "📤  Export Core Stats HTML…"
+        )
+        self._btn_export_core_players_html.setMinimumHeight(34)
+        self._btn_export_core_players_html.setToolTip(
+            "Save only per-player Core stats as a self-contained HTML file"
+        )
+        self._btn_export_core_players_html.clicked.connect(
+            self._on_export_core_players_html_clicked
+        )
+        self._btn_export_core_players_html.hide()
+        picker.addWidget(self._btn_export_core_players_html)
         self._btn_import = QPushButton("📥  Import CSV…")
         self._btn_import.setMinimumHeight(34)
         self._btn_import.clicked.connect(self._on_import_clicked)
@@ -627,6 +642,42 @@ class AnalysisScreen(QWidget):
             except Exception:
                 pass
 
+    def _on_export_core_players_html_clicked(self) -> None:
+        if not self._current_stats:
+            return
+        default_name = self._default_export_filename(self._current_stats)
+        default_name = default_name.replace(".html", "_core_players.html")
+        default_path = str(EXPORTS_DIR / default_name)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export per-player core stats as HTML",
+            default_path,
+            "HTML files (*.html);;All files (*.*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".html"):
+            path += ".html"
+
+        try:
+            html_text = render_player_core_stats_html(self._current_stats)
+            Path(path).write_text(html_text, encoding="utf-8")
+        except Exception as e:
+            QMessageBox.critical(self, "Export failed", str(e))
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("HTML exported")
+        msg.setText(f"File saved:\n{path}")
+        open_btn = msg.addButton("Open folder", QMessageBox.ButtonRole.ActionRole)
+        msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
+        if msg.clickedButton() == open_btn:
+            try:
+                os.startfile(os.path.dirname(path))
+            except Exception:
+                pass
+
     def _default_export_filename(self, stats: dict) -> str:
         g = stats["game"]
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
@@ -752,6 +803,7 @@ class AnalysisScreen(QWidget):
         self._clear_body()
         self._btn_change_game.hide()
         self._btn_export_html.hide()
+        self._btn_export_core_players_html.hide()
         self._match_toggle_wrap.hide()
         self._stack.setCurrentIndex(0)
 
@@ -759,6 +811,7 @@ class AnalysisScreen(QWidget):
         """Switch to the rendered-analysis view."""
         self._btn_change_game.show()
         self._btn_export_html.show()
+        self._btn_export_core_players_html.show()
         self._match_toggle_wrap.setVisible(self._current_match_games is not None)
         self._stack.setCurrentIndex(1)
 
